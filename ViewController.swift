@@ -1,0 +1,235 @@
+//
+//  ViewController.swift
+//  FavouriteImages
+//
+//  Created by Adam Rikardsen-Smith on 01/07/2018.
+//  Copyright © 2018 Adam Rikardsen-Smith. All rights reserved.
+//
+
+import UIKit
+import SwiftyJSON
+
+enum OpacityFade: Float {
+    case hide = 0.0
+    case show = 1.0
+}
+
+class ViewController: UIViewController, UICollectionViewDataSource {
+    
+    @IBOutlet weak var searchField: UITextField!
+    @IBOutlet weak var imageCollectionView: UICollectionView!
+    var searchResults: [SearchResult] = []
+    var saveSearchResults: [SearchResult] = [SearchResult(json: [])]
+    let imageCache = NSCache<SearchResult, UIImage>()
+    var circlePath = UIBezierPath()
+    let animation = CAKeyframeAnimation()
+    @IBOutlet weak var theCircle: Circle!
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        imageCollectionView.dragDelegate = self
+        imageCollectionView.dropDelegate = self
+        circlePath = UIBezierPath(ovalIn: CGRect(x: view.frame.width / 4 + theCircle.frame.width, y: view.frame.height / 2 - theCircle.frame.width, width: view.frame.width / 4, height: view.frame.width / 4))
+        animation.keyPath = "position"
+        animation.repeatCount = .infinity
+        animation.duration = 0.75
+        animation.path = circlePath.cgPath
+        animation.calculationMode = kCAAnimationPaced
+        self.theCircle.layer.add(self.animation, forKey: "move image along bezier path")
+        imageCollectionView.dragInteractionEnabled = true
+        
+    }
+    
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+    }
+    
+    // MARK: Image Management
+    
+    @IBAction func searchForImages(_ sender: Any) {
+        
+        searchResults.removeAll()
+        imageCache.removeAllObjects()
+        changeCircleOpacity(opacityFade: .show)
+        DownloadManager.getInstance().searchImages(query: searchField.text ?? "") { (json: JSON) in
+            if let results = json["hits"].array {
+                for entry in results {
+                    let searchResult: SearchResult = SearchResult(json: entry)
+                    self.searchResults.append(searchResult)
+                    self.cacheImage(searchResult: searchResult)
+                }
+            }
+            self.reloadCollectionView()
+            self.changeCircleOpacity(opacityFade: .hide)
+        }
+
+    }
+
+    func cacheImage(searchResult: SearchResult){
+        let url = URL(string:searchResult.imageURLString ??  "")
+        if let data = NSData(contentsOf: url ?? URL(fileURLWithPath: "")) {
+            self.imageCache.setObject(UIImage(data: data as Data)!, forKey: searchResult)
+        }
+    }
+
+    // MARK: Animation
+    
+    func changeCircleOpacity(opacityFade: OpacityFade){
+        DispatchQueue.main.async {
+            UIViewPropertyAnimator(duration: 1, curve: .easeIn) {
+                switch opacityFade{
+                case .hide: self.theCircle.layer.opacity = 0
+                self.imageCollectionView.layer.opacity = 1
+                case .show: self.theCircle.layer.opacity = 1
+                self.imageCollectionView.layer.opacity = 0
+                }
+                }.startAnimation()
+        }
+        
+    }
+    
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        resignFirstResponder()
+    }
+    
+}
+
+// MARK: Drag and Drop
+
+extension ViewController: UICollectionViewDragDelegate, UICollectionViewDropDelegate {
+
+    func collectionView(_ collectionView: UICollectionView, itemsForBeginning session: UIDragSession, at indexPath: IndexPath) -> [UIDragItem] {
+        let itemProvider = NSItemProvider(object: NSString(string: String(indexPath.row)))
+        let dragItem = UIDragItem(itemProvider: itemProvider)
+
+        return [dragItem]
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, performDropWith coordinator: UICollectionViewDropCoordinator) {
+        guard let destinationIndexPath = coordinator.destinationIndexPath else {
+            return
+        }
+        
+        let item = coordinator.items.first
+        
+        if searchResults.count < 2 && item?.sourceIndexPath?.section == 0{
+            return
+        }
+        if saveSearchResults.count < 2 && item?.sourceIndexPath?.section == 1{
+            return
+        }
+
+        switch coordinator.proposal.operation {
+            
+        case .move:
+        if coordinator.destinationIndexPath?.section == 0 && item?.sourceIndexPath?.section == 0{
+            self.searchResults.insert(self.searchResults.remove(at: (item?.sourceIndexPath?.row) ?? 0), at: destinationIndexPath.row)
+        }
+        if coordinator.destinationIndexPath?.section == 1 && item?.sourceIndexPath?.section == 0{
+            self.saveSearchResults.insert(self.searchResults.remove(at: (item?.sourceIndexPath?.row) ?? 0), at: destinationIndexPath.row)
+        }
+        if coordinator.destinationIndexPath?.section == 0 && item?.sourceIndexPath?.section == 1{
+            self.searchResults.insert(self.saveSearchResults.remove(at: (item?.sourceIndexPath?.row) ?? 0), at: destinationIndexPath.row)
+        }
+        if coordinator.destinationIndexPath?.section == 1 && item?.sourceIndexPath?.section == 1{
+            self.saveSearchResults.insert(self.saveSearchResults.remove(at: (item?.sourceIndexPath?.row) ?? 0), at: destinationIndexPath.row)
+        }
+        
+            imageCollectionView.performBatchUpdates({
+                imageCollectionView.deleteItems(at: [(item?.sourceIndexPath)!])
+                imageCollectionView.insertItems(at: [destinationIndexPath])
+            })
+            
+                coordinator.drop((item?.dragItem)!, toItemAt: destinationIndexPath)
+        
+        default: return
+            
+        }
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, dropSessionDidUpdate session: UIDropSession, withDestinationIndexPath destinationIndexPath: IndexPath?) -> UICollectionViewDropProposal {
+        
+        if session.localDragSession != nil {
+            return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
+        } else {
+            return UICollectionViewDropProposal(operation: .cancel, intent: .insertAtDestinationIndexPath)
+        }
+    }
+    
+}
+
+// MARK: Collection View Delegate
+
+extension ViewController: UICollectionViewDelegate {
+
+    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, insetForSectionAt section: Int) -> UIEdgeInsets {
+        return UIEdgeInsetsMake(0, 0, view.frame.height / 20, 0)
+    }
+    
+    func numberOfSections(in collectionView: UICollectionView) -> Int {
+        return 2
+    }
+
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        if section == 0{
+            return searchResults.count
+        } else{
+            return saveSearchResults.count
+        }
+        
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        
+        let searchCell = collectionView.dequeueReusableCell(withReuseIdentifier: "SearchCell", for: indexPath) as! SearchCell
+        
+        searchCell.imageView.clipsToBounds = true
+        searchCell.imageView.layer.cornerRadius = 10
+        searchCell.layer.cornerRadius = 10
+        if indexPath.section == 1{
+            searchCell.imageView.image = imageCache.object(forKey: saveSearchResults[indexPath.row])
+        } else{
+            searchCell.imageView.image = imageCache.object(forKey: searchResults[indexPath.row])
+        }
+        return searchCell
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        let cell = collectionView.cellForItem(at: indexPath)
+        if cell?.frame.height == collectionView.frame.width{
+            collectionView.reloadData()
+        } else {
+            let newCellYPosition: CGFloat = collectionView.contentOffset.y + collectionView.frame.height / 2 - collectionView.frame.width / 2
+            cell?.frame = CGRect(x: 0, y: newCellYPosition , width: collectionView.frame.width, height: collectionView.frame.width)
+            collectionView.bringSubview(toFront: cell!)
+        }
+
+        resignFirstResponder()
+    }
+    
+    func reloadCollectionView(){
+        DispatchQueue.main.async {
+            self.imageCollectionView.reloadData()
+            self.imageCollectionView.scrollToItem(at: IndexPath(row: 0, section: 0), at: .top, animated: false)
+        }
+    }
+}
+
+
+// MARK: Collection View Layout
+
+extension ViewController: UICollectionViewDelegateFlowLayout {
+    
+    @IBAction func changeLayout() {
+        if CustomLayout.numberOfColumns == 1{
+            CustomLayout.numberOfColumns = 5
+        } else{
+            CustomLayout.numberOfColumns = 1
+        }
+        imageCollectionView?.reloadData()
+    }
+
+    
+
+}
+
