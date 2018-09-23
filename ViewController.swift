@@ -19,14 +19,16 @@ class ViewController: UIViewController, UICollectionViewDataSource {
     @IBOutlet weak var searchField: UITextField!
     @IBOutlet weak var imageCollectionView: UICollectionView!
     var searchResults: [SearchResult] = []
-    var saveSearchResults: [SearchResult] = [SearchResult(json: [])]
+    var saveSearchResults: [SearchResult] = []
     let imageCache = NSCache<SearchResult, UIImage>()
     var circlePath = UIBezierPath()
     let animation = CAKeyframeAnimation()
+    var storedImageData: [Data] = []
     @IBOutlet weak var theCircle: Circle!
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        loadImages()
         imageCollectionView.dragDelegate = self
         imageCollectionView.dropDelegate = self
         circlePath = UIBezierPath(ovalIn: CGRect(x: view.frame.width / 4 + theCircle.frame.width, y: view.frame.height / 2 - theCircle.frame.width, width: view.frame.width / 4, height: view.frame.width / 4))
@@ -49,6 +51,7 @@ class ViewController: UIViewController, UICollectionViewDataSource {
     @IBAction func searchForImages(_ sender: Any) {
         
         searchResults.removeAll()
+        saveSearchResults.removeAll()
         imageCache.removeAllObjects()
         changeCircleOpacity(opacityFade: .show)
         DownloadManager.getInstance().searchImages(query: searchField.text ?? "") { (json: JSON) in
@@ -59,6 +62,8 @@ class ViewController: UIViewController, UICollectionViewDataSource {
                     self.cacheImage(searchResult: searchResult)
                 }
             }
+            
+            self.loadImages()
             self.reloadCollectionView()
             self.changeCircleOpacity(opacityFade: .hide)
         }
@@ -213,6 +218,57 @@ extension ViewController: UICollectionViewDelegate {
             self.imageCollectionView.scrollToItem(at: IndexPath(row: 0, section: 0), at: .top, animated: false)
         }
     }
+    
+    
+    // MARK: Storing images methods
+    
+    func storeImages(){
+        if saveSearchResults.count > 1{
+            for i in 0...saveSearchResults.count - 2{
+                let dataToSave = UIImagePNGRepresentation(imageCache.object(forKey: saveSearchResults[i]) ?? UIImage()) ?? Data()
+                if !storedImageData.contains(dataToSave){
+                    storedImageData.append(dataToSave)
+                    saveImageToCameraRoll(searchResult: saveSearchResults[i])
+                }
+
+            }
+        
+        let defaults = UserDefaults.standard
+            defaults.set(storedImageData, forKey: "SavedImages")
+        }
+        
+    }
+
+    @IBAction func exportImages(){
+        
+        let exportAlert = UIAlertController(title: "Export Images", message: "Are you sure you want to export to the camera roll?", preferredStyle: .alert)
+        exportAlert.addAction(UIAlertAction(title: "Ok", style: .default, handler: {(_) in
+            self.storeImages()
+        }))
+        
+        exportAlert.addAction(UIAlertAction(title: "Cancel", style: .default, handler: {(_) in }))
+        
+        present(exportAlert, animated: true, completion: nil)
+    }
+    
+    func saveImageToCameraRoll(searchResult: SearchResult){
+        UIImageWriteToSavedPhotosAlbum(imageCache.object(forKey: searchResult)!, nil, nil, nil)
+    }
+    
+    
+    
+    func loadImages(){
+        let defaults = UserDefaults.standard
+        storedImageData = (defaults.array(forKey: "SavedImages") as? [Data]) ?? []
+        
+        for imageData in storedImageData{
+            let saveSearchResult: SearchResult = SearchResult(json: [])
+            saveSearchResults.append(saveSearchResult)
+            self.imageCache.setObject(UIImage(data: imageData)!, forKey: saveSearchResult)
+        }
+        saveSearchResults.append(SearchResult(json: []))
+    }
+
 }
 
 
@@ -228,8 +284,9 @@ extension ViewController: UICollectionViewDelegateFlowLayout {
         }
         imageCollectionView?.reloadData()
     }
-
-    
-
 }
+
+
+
+
 

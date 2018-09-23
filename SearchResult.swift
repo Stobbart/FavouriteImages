@@ -11,10 +11,8 @@ import SwiftyJSON
 
 class SearchResult {
     var imageURLString: String!
-    var imageLikes: Int!
     
     required init(json: JSON) {
         imageURLString = json["largeImageURL"].stringValue
-        imageLikes = json["likes"].intValue
     }
 }

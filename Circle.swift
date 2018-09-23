@@ -18,7 +18,7 @@ import UIKit
     override func layoutSubviews() {
         super.layoutSubviews()
         clipsToBounds = true
-        layer.cornerRadius = frame.width / 2
+        layer.cornerRadius = bounds.width / 2
         layer.opacity = 1.0
     }
     
