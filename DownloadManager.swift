@@ -8,9 +8,11 @@
 
 import Foundation
 import SwiftyJSON
+import ReachabilitySwift
 
 class DownloadManager: NSObject {
     
+    static var reachability: Reachability?
     let imageType = "photo"
     let apiKey = "9433532-ee9ee4b231c8a350a7212e041"
     let resultsPerPage: Int = 60
@@ -21,14 +23,19 @@ class DownloadManager: NSObject {
         if(downloadManager == nil) {
             downloadManager = DownloadManager()
         }
-        
+        reachability =  Reachability()
         return downloadManager
     }
     
-    func searchImages(query: String, onCompletion: @escaping (JSON) -> Void) {
-        getSearchImages(query: query, onCompletion: { json, err in
-            onCompletion(json as JSON)
-        })
+    func searchForImages(query: String, onCompletion: @escaping (JSON) -> Void) {
+        if (DownloadManager.reachability?.isReachable) ?? false{
+            getSearchImages(query: query, onCompletion: { json, err in
+                onCompletion(json as JSON)
+            })
+        } else{
+            onCompletion(["No Connection"])
+        }
+
     }
     
     
@@ -60,5 +67,5 @@ class DownloadManager: NSObject {
         })
         task.resume()
 }
-
+ 
 }

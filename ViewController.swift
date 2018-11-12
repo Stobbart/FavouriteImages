@@ -24,11 +24,13 @@ class ViewController: UIViewController, UICollectionViewDataSource {
     var circlePath = UIBezierPath()
     let animation = CAKeyframeAnimation()
     var storedImageData: [Data] = []
+    let validCharacters: [String] = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", ""]
     @IBOutlet weak var theCircle: Circle!
+    let imageCornerRadius: CGFloat = 10
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        loadImages()
+        loadStoredImages()
         imageCollectionView.dragDelegate = self
         imageCollectionView.dropDelegate = self
         circlePath = UIBezierPath(ovalIn: CGRect(x: view.frame.width / 4 + theCircle.frame.width, y: view.frame.height / 2 - theCircle.frame.width, width: view.frame.width / 4, height: view.frame.width / 4))
@@ -37,10 +39,12 @@ class ViewController: UIViewController, UICollectionViewDataSource {
         animation.duration = 0.75
         animation.path = circlePath.cgPath
         animation.calculationMode = kCAAnimationPaced
-        self.theCircle.layer.add(self.animation, forKey: "move image along bezier path")
+        self.theCircle.layer.add(animation, forKey: "move image along bezier path")
         imageCollectionView.dragInteractionEnabled = true
-        
+        searchField.delegate = self
     }
+    
+
     
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
@@ -50,11 +54,18 @@ class ViewController: UIViewController, UICollectionViewDataSource {
     
     @IBAction func searchForImages(_ sender: Any) {
         
+        searchField.resignFirstResponder()
         searchResults.removeAll()
         saveSearchResults.removeAll()
         imageCache.removeAllObjects()
         changeCircleOpacity(opacityFade: .show)
-        DownloadManager.getInstance().searchImages(query: searchField.text ?? "") { (json: JSON) in
+        
+        DownloadManager.getInstance().searchForImages(query: searchField.text ?? "") { (json: JSON) in
+            
+            if self.returnedNoConnection(json: json){
+                return
+            }
+            
             if let results = json["hits"].array {
                 for entry in results {
                     let searchResult: SearchResult = SearchResult(json: entry)
@@ -63,11 +74,27 @@ class ViewController: UIViewController, UICollectionViewDataSource {
                 }
             }
             
-            self.loadImages()
+            self.loadStoredImages()
             self.reloadCollectionView()
             self.changeCircleOpacity(opacityFade: .hide)
         }
 
+    }
+    
+    func returnedNoConnection(json: JSON) -> Bool{
+        if json[0] == "No Connection"{
+            self.changeCircleOpacity(opacityFade: .hide)
+            showNoConnectionAlert()
+            return true
+        }
+        return false
+    }
+    
+    func showNoConnectionAlert(){
+        let noConnectionAlert = UIAlertController(title: "No Internet Connection", message: "Please connect to the internet to download images", preferredStyle: .alert)
+        noConnectionAlert.addAction(UIAlertAction(title: "Ok", style: .cancel, handler: {(_) in }))
+        
+        present(noConnectionAlert, animated: true, completion: nil)
     }
 
     func cacheImage(searchResult: SearchResult){
@@ -83,10 +110,10 @@ class ViewController: UIViewController, UICollectionViewDataSource {
         DispatchQueue.main.async {
             UIViewPropertyAnimator(duration: 1, curve: .easeIn) {
                 switch opacityFade{
-                case .hide: self.theCircle.layer.opacity = 0
-                self.imageCollectionView.layer.opacity = 1
-                case .show: self.theCircle.layer.opacity = 1
-                self.imageCollectionView.layer.opacity = 0
+                    case .hide: self.theCircle.layer.opacity = 0
+                    self.imageCollectionView.layer.opacity = 1
+                    case .show: self.theCircle.layer.opacity = 1
+                    self.imageCollectionView.layer.opacity = 0
                 }
                 }.startAnimation()
         }
@@ -176,10 +203,14 @@ extension ViewController: UICollectionViewDelegate {
     }
 
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        if section == 0{
+        
+        switch section {
+        case 0:
             return searchResults.count
-        } else{
+        case 1:
             return saveSearchResults.count
+        default:
+            return 0
         }
         
     }
@@ -189,8 +220,8 @@ extension ViewController: UICollectionViewDelegate {
         let searchCell = collectionView.dequeueReusableCell(withReuseIdentifier: "SearchCell", for: indexPath) as! SearchCell
         
         searchCell.imageView.clipsToBounds = true
-        searchCell.imageView.layer.cornerRadius = 10
-        searchCell.layer.cornerRadius = 10
+        searchCell.imageView.layer.cornerRadius = imageCornerRadius
+        searchCell.layer.cornerRadius = imageCornerRadius
         if indexPath.section == 1{
             searchCell.imageView.image = imageCache.object(forKey: saveSearchResults[indexPath.row])
         } else{
@@ -215,6 +246,12 @@ extension ViewController: UICollectionViewDelegate {
     func reloadCollectionView(){
         DispatchQueue.main.async {
             self.imageCollectionView.reloadData()
+            self.scrollToTop()
+        }
+    }
+    
+    func scrollToTop(){
+        if self.searchResults.count > 0{
             self.imageCollectionView.scrollToItem(at: IndexPath(row: 0, section: 0), at: .top, animated: false)
         }
     }
@@ -222,7 +259,7 @@ extension ViewController: UICollectionViewDelegate {
     
     // MARK: Storing images methods
     
-    func storeImages(){
+    func storeImagesLocally(){
         if saveSearchResults.count > 1{
             for i in 0...saveSearchResults.count - 2{
                 let dataToSave = UIImagePNGRepresentation(imageCache.object(forKey: saveSearchResults[i]) ?? UIImage()) ?? Data()
@@ -243,7 +280,7 @@ extension ViewController: UICollectionViewDelegate {
         
         let exportAlert = UIAlertController(title: "Export Images", message: "Are you sure you want to export to the camera roll?", preferredStyle: .alert)
         exportAlert.addAction(UIAlertAction(title: "Ok", style: .default, handler: {(_) in
-            self.storeImages()
+            self.storeImagesLocally()
         }))
         
         exportAlert.addAction(UIAlertAction(title: "Cancel", style: .default, handler: {(_) in }))
@@ -257,7 +294,7 @@ extension ViewController: UICollectionViewDelegate {
     
     
     
-    func loadImages(){
+    func loadStoredImages(){
         let defaults = UserDefaults.standard
         storedImageData = (defaults.array(forKey: "SavedImages") as? [Data]) ?? []
         
@@ -286,7 +323,31 @@ extension ViewController: UICollectionViewDelegateFlowLayout {
     }
 }
 
+// MARK: UITextFieldDelegate
 
-
+extension ViewController: UITextFieldDelegate{
+    
+    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        
+        if validCharacters.contains(string){
+            return true
+        } else{
+            return false
+        }
+        
+    }
+    
+    func textFieldShouldEndEditing(_ textField: UITextField) -> Bool {
+        return true
+    }
+    
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return true
+    }
+    
+ 
+    
+}
 
 
